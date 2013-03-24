@@ -13,132 +13,125 @@ module Control.Monad.ST.Logic
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Logic (LogicT, runLogicT)
+import Control.Monad.Logic
 import Control.Monad.ST
-import Control.Monad.ST.Label (Label, LabelSupplyST, runLabelSupplyST)
-import qualified Control.Monad.ST.Label as Label
-import Control.Monad.Trans.Class (MonadTrans (lift))
-import Control.Monad.Trans.State.Strict.Strict (StateT, evalStateT)
-import qualified Control.Monad.Trans.State.Strict.Strict as State
 
-import Data.List.NonEmpty (NonEmpty ((:|)))
-import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.STRef as ST
 
-import Prelude hiding (dropWhile)
-
 newtype LogicST s a =
-  LogicST { unLogicST :: StateT (NonEmpty (Label s)) (LogicT (LabelSupplyST s)) a
+  LogicST { unLogicST :: Flag s -> LogicT (ST s) a
           }
 
-runLogicST :: (forall s . LogicST s a) -> (a -> r -> r) -> r -> r
-runLogicST m plus zero = runLabelSupplyST $ do
-  x <- Label.newLabel
-  runLogicT (evalStateT (unLogicST m) (x :| [])) (liftM . plus) (return zero)
+runLogicST :: LogicST s a -> (a -> ST s r -> ST s r) -> ST s r -> ST s r
+runLogicST m plus zero = do
+  flag <- newFlag
+  runLogicT (unLogicST m flag) plus zero
 
 liftST :: ST s a -> LogicST s a
-liftST = LogicST . lift . lift . Label.liftST
+liftST = liftReaderT . lift
+
+mapReaderT :: (LogicT (ST s) a -> LogicT (ST s) b) -> LogicST s a -> LogicST s b
+mapReaderT f m = LogicST $ f . unLogicST m
+
+liftReaderT :: LogicT (ST s) a -> LogicST s a
+liftReaderT = LogicST . const
 
 instance Functor (LogicST s) where
-  fmap f = LogicST . fmap f . unLogicST
+  fmap = mapReaderT . fmap
 
 instance Applicative (LogicST s) where
-  pure = LogicST . pure
-  f <*> a = LogicST $ unLogicST f <*> unLogicST a
+  pure = liftReaderT . pure
+  f <*> a = LogicST $ \ r -> unLogicST f r <*> unLogicST a r
 
 instance Alternative (LogicST s) where
-  empty = LogicST empty
-  m <|> n = LogicST $ unLogicST (label >> m) <|> unLogicST (label >> n)
+  empty = liftReaderT empty
+  m <|> n = LogicST $ \ r ->
+    lift newFlag >>= \ r' ->
+    unLogicST m r' <|>
+    (markFlag r' >> unLogicST n r)
 
 instance Monad (LogicST s) where
-  return = LogicST . return
-  m >>= k = LogicST $ unLogicST m >>= (unLogicST . k)
-  m >> n = LogicST $ unLogicST m >> unLogicST n
-  fail = LogicST . fail
+  return = liftReaderT . return
+  m >>= k = LogicST $ \ r -> do
+    a <- unLogicST m r
+    unLogicST (k a) r
+  fail = liftReaderT . fail
 
 instance MonadPlus (LogicST s) where
-  mzero = LogicST mzero
-  m `mplus` n = LogicST $ unLogicST (label >> m) `mplus` unLogicST (label >> n)
+  mzero = liftReaderT mzero
+  m `mplus` n =
+    LogicST $ \ r ->
+    lift newFlag >>= \ r' ->
+    unLogicST m r' `mplus`
+    (markFlag r' >> unLogicST n r)
 
-newtype STRef s a = STRef { unSTRef :: ST.STRef s (Value s a) }
+instance MonadLogic (LogicST s) where
+  msplit m = LogicST $ fmap (fmap (fmap liftReaderT)) . msplit . unLogicST m
 
-type Value s a = NonEmpty (Write s a)
+ask :: LogicST s (Flag s)
+ask = LogicST return
 
-data Write s a = Write !(Label s) a
+type Flag s = ST.STRef s Bool
+
+newFlag :: ST s (Flag s)
+newFlag = ST.newSTRef False
+
+markFlag :: Flag s -> LogicT (ST s) ()
+markFlag = lift . flip ST.writeSTRef True
+
+ifMarked :: Flag s -> ST s a -> ST s a -> ST s a
+ifMarked flag t f = do
+  p <- ST.readSTRef flag
+  if p then t else f
+
+newtype STRef s a = STRef (ST.STRef s (Value s a))
+
+data Value s a
+  = New {-# UNPACK #-} !(Write s a)
+  | {-# UNPACK #-} !(Write s a) :| !(Value s a)
+
+data Write s a = Write {-# UNPACK #-} !(Flag s) a
 
 newSTRef :: a -> LogicST s (STRef s a)
-newSTRef a = do
-  x <- gets NonEmpty.head
-  liftST $ STRef <$> ST.newSTRef (Write x a :| [])
+newSTRef a = ask >>= liftST . fmap STRef . ST.newSTRef .! New . flip Write a
+
+infixr 9 .!
+(.!) :: (b -> c) -> (a -> b) -> a -> c
+f .! g = \ a -> a `seq` f (g a)
 
 readSTRef :: STRef s a -> LogicST s a
-readSTRef ref = do
-  backtrack ref
-  liftST $ fromValue <$> ST.readSTRef (unSTRef ref)
+readSTRef (STRef ref) = liftST $ backtrack =<< ST.readSTRef ref
+  where
+    backtrack (Write flag a :| xs) = ifMarked flag (go xs) (return a)
+    backtrack (New (Write _ a)) = return a
+    go xs@(Write flag a :| ys) =
+      ifMarked flag (go ys) (ST.writeSTRef ref xs >> return a)
+    go xs@(New (Write _ a)) =
+      ST.writeSTRef ref xs >> return a
 
 writeSTRef :: STRef s a -> a -> LogicST s ()
-writeSTRef ref a = do
-  backtrack ref
-  x <- gets NonEmpty.head
-  liftST $ ST.modifySTRef (unSTRef ref) (modifyValue x a)
+writeSTRef ref a = modifySTRef ref (const a)
 
 modifySTRef :: STRef s a -> (a -> a) -> LogicST s ()
-modifySTRef ref f = writeSTRef ref . f =<< readSTRef ref
+modifySTRef (STRef ref) f = LogicST $ \ r -> do
+  xs <- lift $ ST.readSTRef ref
+  lift $ backtrack xs r
+  where
+    backtrack xs@(Write flag a :| ys) r =
+      ifMarked flag
+      (backtrack ys r)
+      (ST.writeSTRef ref $! Write r (f a) :| if flag == r then ys else xs)
+    backtrack xs@(New (Write flag a)) r =
+      ST.writeSTRef ref $! if flag == r then New (Write r (f a)) else Write r a :| xs
 
 modifySTRef' :: STRef s a -> (a -> a) -> LogicST s ()
-modifySTRef' ref f = do
-  x <- readSTRef ref
-  let x' = f x
-  x' `seq` writeSTRef ref x'
-
-label :: LogicST s ()
-label = do
-  x <- newLabel
-  modify $ NonEmpty.cons x
-
-backtrack :: STRef s a -> LogicST s ()
-backtrack ref = do
-  ws@(Write x _ :| _) <- liftST $ ST.readSTRef (unSTRef ref)
-  y <- gets $ findLE x
-  whenJust (dropWhile (\ (Write x' _) -> x' > y) ws) $ \ ws' ->
-    liftST $ ST.writeSTRef (unSTRef ref) $! NonEmpty.fromList ws'
-
-newLabel :: LogicST s (Label s)
-newLabel = LogicST $ lift $ lift Label.newLabel
-
-fromValue :: Value s a -> a
-fromValue (Write _ a :| _) = a
-
-modifyValue :: Label s -> a -> Value s a -> Value s a
-modifyValue x a (w@(Write y _) :| ws)
-  | x == y = Write x a :| ws
-  | otherwise = Write x a :| w : ws
-
-gets :: (NonEmpty (Label s) -> a) -> LogicST s a
-gets = LogicST . State.gets
-
-modify :: (NonEmpty (Label s) -> NonEmpty (Label s)) -> LogicST s ()
-modify = LogicST . State.modify
-
-dropWhile :: (a -> Bool) -> NonEmpty a -> Maybe [a]
-dropWhile = (. NonEmpty.toList) . go
+modifySTRef' (STRef ref) f = LogicST $ \ r -> do
+  xs <- lift $ ST.readSTRef ref
+  lift $ backtrack xs r
   where
-    go _ [] = Nothing
-    go p (x : xs')
-      | p x = Just $ go' p xs'
-      | otherwise = Nothing
-    go' _ [] = []
-    go' p xs@(x : xs')
-      | p x = go' p xs'
-      | otherwise = xs
-
-whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
-whenJust p k = maybe (return ()) k p
-
-findLE :: Ord a => a -> NonEmpty a -> a
-findLE = (. NonEmpty.toList) . go
-  where
-    go _ [] = error "findLE: empty list"
-    go y (x : xs)
-      | x <= y = x
-      | otherwise = go y xs
+    backtrack xs@(Write flag a :| ys) r =
+      ifMarked flag
+      (backtrack ys r)
+      (ST.writeSTRef ref $! (Write r $! f a) :| if flag == r then ys else xs)
+    backtrack xs@(New (Write flag a)) r =
+      ST.writeSTRef ref $! if flag == r then New (Write r $! f a) else Write r a :| xs

@@ -14,14 +14,6 @@ cabal-version:       >= 1.10
 library
   default-language: Haskell98
   hs-source-dirs: src
-  exposed-modules:
-    Control.Monad.ST.Logic
-  other-modules:
-    Control.Monad.ST.Label
-    Control.Monad.Trans.State.Strict.Strict
-  build-depends:
-    base >= 4 && < 5,
-    transformers,
-    logict,
-    semigroups
-  ghc-options: -Wall
+  exposed-modules: Control.Monad.ST.Logic
+  build-depends: base >= 4 && < 5, logict
+  ghc-options: -Wall -O2
