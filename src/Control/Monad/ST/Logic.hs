@@ -2,6 +2,9 @@
 module Control.Monad.ST.Logic
        ( LogicST
        , runLogicST
+       , observeST
+       , observeAllST
+       , observeManyST
        , liftST
        , STRef
        , newSTRef
@@ -14,7 +17,7 @@ module Control.Monad.ST.Logic
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Logic
-import Control.Monad.ST
+import Control.Monad.ST.Safe
 
 import qualified Data.STRef as ST
 
@@ -26,6 +29,15 @@ runLogicST :: LogicST s a -> (a -> ST s r -> ST s r) -> ST s r -> ST s r
 runLogicST m plus zero = do
   flag <- newFlag
   runLogicT (unLogicST m flag) plus zero
+
+observeST :: LogicST s a -> ST s a
+observeST m = newFlag >>= observeT . unLogicST m
+
+observeAllST :: LogicST s a -> ST s [a]
+observeAllST m = newFlag >>= observeAllT . unLogicST m
+
+observeManyST :: Int -> LogicST s a -> ST s [a]
+observeManyST n m = newFlag >>= observeManyT n . unLogicST m
 
 liftST :: ST s a -> LogicST s a
 liftST = liftReaderT . lift
@@ -106,32 +118,25 @@ readSTRef (STRef ref) = liftST $ backtrack =<< ST.readSTRef ref
     backtrack (New (Write _ a)) = return a
     go xs@(Write flag a :| ys) =
       ifMarked flag (go ys) (ST.writeSTRef ref xs >> return a)
-    go xs@(New (Write _ a)) =
-      ST.writeSTRef ref xs >> return a
+    go xs@(New (Write _ a)) = ST.writeSTRef ref xs >> return a
 
 writeSTRef :: STRef s a -> a -> LogicST s ()
-writeSTRef ref a = modifySTRef ref (const a)
+writeSTRef ref a = modifySTRef'' ref $ \ (Write flag _) -> Write flag a
 
 modifySTRef :: STRef s a -> (a -> a) -> LogicST s ()
-modifySTRef (STRef ref) f = LogicST $ \ r -> do
-  xs <- lift $ ST.readSTRef ref
-  lift $ backtrack xs r
-  where
-    backtrack xs@(Write flag a :| ys) r =
-      ifMarked flag
-      (backtrack ys r)
-      (ST.writeSTRef ref $! Write r (f a) :| if flag == r then ys else xs)
-    backtrack xs@(New (Write flag a)) r =
-      ST.writeSTRef ref $! if flag == r then New (Write r (f a)) else Write r a :| xs
+modifySTRef ref f = modifySTRef'' ref $ \ (Write flag a) -> Write flag (f a)
 
 modifySTRef' :: STRef s a -> (a -> a) -> LogicST s ()
-modifySTRef' (STRef ref) f = LogicST $ \ r -> do
-  xs <- lift $ ST.readSTRef ref
-  lift $ backtrack xs r
+modifySTRef' ref f = modifySTRef'' ref $ \ (Write flag a) -> Write flag $! f a
+
+modifySTRef'' :: STRef s a -> (Write s a -> Write s a) -> LogicST s ()
+modifySTRef'' (STRef ref) f =
+  LogicST $ \ r -> lift $ ST.readSTRef ref >>= backtrack r
   where
-    backtrack xs@(Write flag a :| ys) r =
+    backtrack r xs@(x@(Write flag _) :| ys) =
       ifMarked flag
-      (backtrack ys r)
-      (ST.writeSTRef ref $! (Write r $! f a) :| if flag == r then ys else xs)
-    backtrack xs@(New (Write flag a)) r =
-      ST.writeSTRef ref $! if flag == r then New (Write r $! f a) else Write r a :| xs
+      (backtrack r ys)
+      (ST.writeSTRef ref $! (f x) :| if flag == r then ys else xs)
+    backtrack r xs@(New x@(Write flag _)) =
+      ST.writeSTRef ref $!
+      if flag == r then New (f x) else (f x) :| xs
