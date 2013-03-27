@@ -39,18 +39,22 @@ class Monad m => MonadST m where
 instance MonadST (ST s) where
   type World (ST s) = s
   liftST = id
+  {-# INLINE liftST #-}
 
 instance MonadST IO where
   type World IO = RealWorld
   liftST = stToIO
+  {-# INLINE liftST #-}
 
 instance MonadST m => MonadST (ReaderT r m) where
   type World (ReaderT r m) = World m
   liftST = lift . liftST
+  {-# INLINE liftST #-}
 
 instance MonadST m => MonadST (Logic.LogicT m) where
   type World (Logic.LogicT m) = World m
   liftST = lift . liftST
+  {-# INLINE liftST #-}
 
 newtype WrappedMonadIO m a = WrapMonadIO { unwrapMonadIO :: m a }
 
@@ -58,18 +62,24 @@ type WrappedIO = WrappedMonadIO IO
 
 instance Monad m => Monad (WrappedMonadIO m) where
   return = WrapMonadIO . return
+  {-# INLINE return #-}
   m >>= k = WrapMonadIO $ unwrapMonadIO m >>= unwrapMonadIO . k
+  {-# INLINE (>>=) #-}
   fail = WrapMonadIO . fail
+  {-# INLINE fail #-}
 
 instance MonadTrans WrappedMonadIO where
   lift = WrapMonadIO
+  {-# INLINE lift #-}
 
 instance MonadIO m => MonadIO (WrappedMonadIO m) where
-  liftIO = WrapMonadIO . liftIO
+  liftIO = lift . liftIO
+  {-# INLINE liftIO #-}
 
 instance MonadIO m => MonadST (WrappedMonadIO m) where
   type World (WrappedMonadIO m) = RealWorld
   liftST = liftIO . stToIO
+  {-# INLINE liftST #-}
 
 newtype LogicT m a =
   LogicT { unLogicT :: ReaderT (Switch (World m)) (Logic.LogicT m) a
@@ -121,7 +131,7 @@ instance MonadST m => Alternative (LogicT m) where
   empty = LogicT empty
   {-# INLINE empty #-}
   m <|> n = LogicT $ do
-    r <- lift $ lift newSwitch
+    r <- newSwitch
     using r (unLogicT m) <|> flipSwitch r *> unLogicT n
   {-# SPECIALIZE (<|>) :: LogicST s a -> LogicST s a -> LogicST s a #-}
   {-# SPECIALIZE (<|>) :: LogicIO a -> LogicIO a -> LogicIO a #-}
@@ -135,7 +145,7 @@ instance MonadST m => MonadPlus (LogicT m) where
   mzero = LogicT mzero
   {-# INLINE mzero #-}
   m `mplus` n = LogicT $ do
-    r <- lift $ lift newSwitch
+    r <- newSwitch
     using r (unLogicT m) `mplus` (flipSwitch r >> unLogicT n)
   {-# SPECIALIZE mplus :: LogicST s a -> LogicST s a -> LogicST s a #-}
   {-# SPECIALIZE mplus :: LogicIO a -> LogicIO a -> LogicIO a #-}
@@ -143,6 +153,7 @@ instance MonadST m => MonadPlus (LogicT m) where
 instance MonadST m => MonadST (LogicT m) where
   type World (LogicT m) = World m
   liftST = LogicT . lift . lift . liftST
+  {-# INLINE liftST #-}
 
 instance MonadST m => MonadLogic (LogicT m) where
   msplit = LogicT . fmap (fmap (fmap LogicT)) . msplit . unLogicT
@@ -154,11 +165,11 @@ type Switch s = ST.STRef s Bool
 
 newSwitch :: MonadST m => m (Switch (World m))
 newSwitch = liftST $ ST.newSTRef False
-{-# INLINABLE newSwitch #-}
+{-# INLINE newSwitch #-}
 
 flipSwitch :: MonadST m => Switch (World m) -> m ()
 flipSwitch = liftST . flip ST.writeSTRef True
-{-# INLINABLE flipSwitch #-}
+{-# INLINE flipSwitch #-}
 
 ifFlipped :: Switch s -> ST s a -> ST s a -> ST s a
 ifFlipped switch t f = do
@@ -178,8 +189,11 @@ data Value s a
 data Write s a = Write {-# UNPACK #-} !(Switch s) a
 
 newRef :: MonadST m => a -> LogicT m (Ref (World m) a)
-newRef a = ask >>= liftST . fmap Ref . ST.newSTRef .! New . flip Write a
-{-# INLINABLE newRef #-}
+newRef a = ask >>= liftST . fmap Ref . newSTRef a
+{-# INLINE newRef #-}
+
+newSTRef :: a -> Switch s -> ST s (ST.STRef s (Value s a))
+newSTRef a = ST.newSTRef .! New . flip Write a
 
 infixr 9 .!
 (.!) :: (b -> c) -> (a -> b) -> a -> c
