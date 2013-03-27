@@ -21,11 +21,11 @@ import Control.Monad
 import Control.Monad.IO.Class
 import qualified Control.Monad.Logic as Logic
 import Control.Monad.Logic.Class
--- #if MIN_VERSION_base(4, 4, 0)
+#if MIN_VERSION_base(4, 4, 0)
 import Control.Monad.ST.Safe
--- #else
--- import Control.Monad.ST
--- #endif
+#else
+import Control.Monad.ST
+#endif
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import qualified Control.Monad.Trans.Reader as Reader
