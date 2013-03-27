@@ -5,15 +5,29 @@ version:             0.1.0.0
 license:             BSD3
 license-file:        LICENSE
 author:              Andy Sonnenburg
-maintainer:          andy22286@gmail.com
+maintainer:          Andy Sonnenburg <andy22286@gmail.com>
+homepage:            http://github.com/sonyandy/logicst
+bug-reports:         http://github.com/sonyandy/logicst/issues
 -- copyright:           
 category:            Control
 build-type:          Simple
-cabal-version:       >= 1.10
+cabal-version:       >= 1.6
+
+source-repository head
+  type: git
+  location: git://github.com/sonyandy/logicst.git
 
 library
-  default-language: Haskell98
   hs-source-dirs: src
-  exposed-modules: Control.Monad.ST.Logic
-  build-depends: base >= 4 && < 5, logict
+  exposed-modules:
+    Control.Monad.IO.Logic
+    Control.Monad.ST.Logic
+    Data.IORef.Logic
+    Data.STRef.Logic
+  other-modules:
+    Control.Monad.IO.Logic.Internal
+    Control.Monad.Ref.Logic.Internal
+    Control.Monad.ST.Logic.Internal
+  build-depends: base >= 4 && < 5, transformers, logict
+  other-extensions: CPP, Rank2Types, TypeFamilies
   ghc-options: -Wall -O2
