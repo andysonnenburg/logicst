@@ -22,12 +22,9 @@ library
   exposed-modules:
     Control.Monad.IO.Logic
     Control.Monad.ST.Logic
+    Control.Monad.ST.Logic.Internal
     Data.IORef.Logic
     Data.STRef.Logic
-  other-modules:
-    Control.Monad.IO.Logic.Internal
-    Control.Monad.Ref.Logic.Internal
-    Control.Monad.ST.Logic.Internal
   build-depends: base >= 4 && < 5, transformers, logict
   other-extensions: CPP, Rank2Types, TypeFamilies
   ghc-options: -Wall -O2

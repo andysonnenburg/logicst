@@ -7,28 +7,27 @@ module Data.IORef.Logic
        , modifyIORef'
        ) where
 
-import Control.Monad.IO.Class
-import Control.Monad.IO.Logic.Internal
-import qualified Control.Monad.Ref.Logic.Internal as Internal
+import Control.Monad.IO.Logic
+import Control.Monad.ST.Logic.Internal
 
-newtype IORef s a = IORef { unIORef :: Internal.IORef a }
+type IORef s = Ref s IO
 
-newIORef :: MonadIO m => a -> LogicT s m (IORef s a)
-newIORef = LogicT . fmap IORef . Internal.newRef
+newIORef :: a -> LogicIO s (IORef s a)
+newIORef = newRef
 {-# INLINE newIORef #-}
 
-readIORef :: MonadIO m => IORef s a -> LogicT s m a
-readIORef = LogicT . Internal.readRef . unIORef
+readIORef ::IORef s a -> LogicIO s a
+readIORef = readRef
 {-# INLINE readIORef #-}
 
-writeIORef :: MonadIO m => IORef s a -> a -> LogicT s m ()
-writeIORef ref = LogicT . Internal.writeRef (unIORef ref)
+writeIORef :: IORef s a -> a -> LogicIO s ()
+writeIORef = writeRef
 {-# INLINE writeIORef #-}
 
-modifyIORef :: MonadIO m => IORef s a -> (a -> a) -> LogicT s m ()
-modifyIORef ref = LogicT . Internal.modifyRef (unIORef ref)
+modifyIORef :: IORef s a -> (a -> a) -> LogicIO s ()
+modifyIORef = modifyRef
 {-# INLINE modifyIORef #-}
 
-modifyIORef' :: MonadIO m => IORef s a -> (a -> a) -> LogicT s m ()
-modifyIORef' ref = LogicT . Internal.modifyRef' (unIORef ref)
+modifyIORef' :: IORef s a -> (a -> a) -> LogicIO s ()
+modifyIORef' = modifyRef'
 {-# INLINE modifyIORef' #-}
