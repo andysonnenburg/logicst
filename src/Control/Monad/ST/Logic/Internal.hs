@@ -123,6 +123,12 @@ instance Applicative (LogicT s m) where
   {-# INLINE pure #-}
   f <*> a = LogicT $ unLogicT f <*> unLogicT a
   {-# INLINE (<*>) #-}
+#if MIN_VERSION_base(4, 2, 0)
+  a *> b = LogicT $ unLogicT a *> unLogicT b
+  {-# INLINE (*>) #-}
+  a <* b = LogicT $ unLogicT a <* unLogicT b
+  {-# INLINE (<*) #-}
+#endif
 
 instance MonadST m => Alternative (LogicT s m) where
   empty = LogicT empty
@@ -135,6 +141,8 @@ instance Monad (LogicT s m) where
   {-# INLINE return #-}
   m >>= k = LogicT $ unLogicT m >>= unLogicT . k
   {-# INLINE (>>=) #-}
+  m >> n = LogicT $ unLogicT m >> unLogicT n
+  {-# INLINE (>>) #-}
   fail = LogicT . fail
   {-# INLINE fail #-}
 
@@ -157,6 +165,8 @@ instance MonadST m => MonadLogic (LogicT s m) where
 
 lift' :: Monad m => m a -> LogicT s m a
 lift' = LogicT . lift . lift
+{-# SPECIALIZE lift' :: ST s a -> LogicST s a #-}
+{-# SPECIALIZE lift' :: IO a -> LogicIO s a #-}
 
 instance MonadIO m => MonadIO (LogicT s m) where
   liftIO = lift' . liftIO
@@ -164,12 +174,17 @@ instance MonadIO m => MonadIO (LogicT s m) where
 instance MonadST m => MonadST (LogicT s m) where
   type World (LogicT s m) = World m
   liftST = lift' . liftST
+  {-# INLINE liftST #-}
 
 get :: Monad m => LogicT s m (Switch m)
 get = LogicT State.get
+{-# SPECIALIZE get :: LogicST s (Switch (ST s)) #-}
+{-# SPECIALIZE get :: LogicIO s (Switch IO) #-}
 
 put :: Monad m => Switch m -> LogicT s m ()
 put s = s `seq` LogicT (State.put s)
+{-# SPECIALIZE put :: Switch (ST s) -> LogicST s () #-}
+{-# SPECIALIZE put :: Switch IO -> LogicIO s () #-}
 
 type Switch m = ST.STRef (World m) Bool
 
@@ -254,3 +269,5 @@ modifySTRef ref f = \ r -> ST.readSTRef ref >>= \ value -> backtrack value r
     backtrack xs@(New (Write switch a)) r =
       ST.writeSTRef ref $!
       if switch == r then New (f r a) else f r a :| xs
+{-# INLINE modifySTRef #-}
+
