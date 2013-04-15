@@ -60,12 +60,14 @@ runLogicT m = unsafeRunLogicT m
 
 runLogicST :: (forall s . LogicST s a) -> (a -> r -> r) -> r -> r
 runLogicST m next zero = runST $ unsafeRunLogicT m (liftM . next) (return zero)
+{-# INLINE runLogicST #-}
 
 unsafeRunLogicT :: MonadST m => LogicT s m a -> (a -> m r -> m r) -> m r -> m r
 unsafeRunLogicT m next zero = do
   s <- newSwitch
   Logic.runLogicT (evalStateT (unLogicT m) s) next zero
 {-# SPECIALIZE unsafeRunLogicT :: LogicST s a -> (a -> ST s r -> ST s r) -> ST s r -> ST s r #-}
+{-# SPECIALIZE unsafeRunLogicT :: LogicIO s a -> (a -> IO r -> IO r) -> IO r -> IO r #-}
 
 observeT :: MonadST m => (forall s . LogicT s m a) -> m a
 observeT m = unsafeObserveT m
@@ -80,6 +82,7 @@ unsafeObserveT m = do
   s <- newSwitch
   Logic.observeT (evalStateT (unLogicT m) s)
 {-# SPECIALIZE unsafeObserveT :: LogicST s a -> ST s a #-}
+{-# SPECIALIZE unsafeObserveT :: LogicIO s a -> IO a #-}
 
 observeAllT :: MonadST m => (forall s . LogicT s m a) -> m [a]
 observeAllT m = unsafeObserveAllT m
@@ -94,9 +97,11 @@ unsafeObserveAllT m = do
   s <- newSwitch
   Logic.observeAllT (evalStateT (unLogicT m) s)
 {-# SPECIALIZE unsafeObserveAllT :: LogicST s a -> ST s [a] #-}
+{-# SPECIALIZE unsafeObserveAllT :: LogicIO s a -> IO [a] #-}
 
 observeManyT :: MonadST m => Int -> (forall s . LogicT s m a) -> m [a]
 observeManyT n m = unsafeObserveManyT n m
+{-# INLINE observeManyT #-}
 
 observeManyST :: Int -> (forall s . LogicST s a) -> [a]
 observeManyST n m = runST $ unsafeObserveManyT n m
@@ -107,6 +112,7 @@ unsafeObserveManyT n m = do
   s <- newSwitch
   Logic.observeManyT n (evalStateT (unLogicT m) s)
 {-# SPECIALIZE unsafeObserveManyT :: Int -> LogicST s a -> ST s [a] #-}
+{-# SPECIALIZE unsafeObserveManyT :: Int -> LogicIO s a -> IO [a] #-}
 
 instance Functor (LogicT s m) where
   fmap f = LogicT . fmap f . unLogicT
