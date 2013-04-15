@@ -218,19 +218,19 @@ readSTRef ref = ST.readSTRef ref >>= \ value -> case value of
 
 writeRef :: MonadST m => Ref s m a -> a -> LogicT s m ()
 writeRef ref a = modifyRef'' ref $ \ switch _ -> Write switch a
-{-# INLINE writeRef #-}
+{-# INLINABLE writeRef #-}
 
 modifyRef :: MonadST m => Ref s m a -> (a -> a) -> LogicT s m ()
 modifyRef ref f = modifyRef'' ref $ \ switch a -> Write switch $ f a
-{-# INLINE modifyRef #-}
+{-# INLINABLE modifyRef #-}
 
 modifyRef' :: MonadST m => Ref s m a -> (a -> a) -> LogicT s m ()
 modifyRef' ref f = modifyRef'' ref $ \ switch a -> Write switch $! f a
-{-# INLINE modifyRef' #-}
+{-# INLINABLE modifyRef' #-}
 
 modifyRef'' :: MonadST m => Ref s m a -> (Switch m -> a -> Write m a) -> LogicT s m ()
 modifyRef'' (Ref ref) f = get >>= \ r -> liftST $ modifySTRef ref f r
-{-# INLINABLE modifyRef'' #-}
+{-# INLINE modifyRef'' #-}
 
 modifySTRef :: ST.STRef (World m) (Value m a) ->
                (Switch m -> a -> Write m a) ->
