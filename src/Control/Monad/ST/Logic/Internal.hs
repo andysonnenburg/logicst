@@ -6,14 +6,11 @@ module Control.Monad.ST.Logic.Internal
        , observeAllT
        , observeManyT
        , LogicST
+       , LogicIO
        , runLogicST
        , observeST
        , observeAllST
        , observeManyST
-       , logicPlus
-       , unsafeObserveT
-       , unsafeObserveManyT
-       , unsafeObserveAllT
        , Ref
        , newRef
        , readRef
@@ -55,19 +52,20 @@ newtype LogicT s m a =
          }
 
 type LogicST s = LogicT s (ST s)
+type LogicIO s = LogicT s IO
 
 runLogicT :: MonadST m => (forall s . LogicT s m a) -> (a -> m r -> m r) -> m r -> m r
-runLogicT m = runLogicT' m
+runLogicT m = unsafeRunLogicT m
 {-# INLINE runLogicT #-}
 
 runLogicST :: (forall s . LogicST s a) -> (a -> r -> r) -> r -> r
-runLogicST m next zero = runST $ runLogicT' m (liftM . next) (return zero)
+runLogicST m next zero = runST $ unsafeRunLogicT m (liftM . next) (return zero)
 
-runLogicT' :: MonadST m => LogicT s m a -> (a -> m r -> m r) -> m r -> m r
-runLogicT' m next zero = do
+unsafeRunLogicT :: MonadST m => LogicT s m a -> (a -> m r -> m r) -> m r -> m r
+unsafeRunLogicT m next zero = do
   s <- newSwitch
   Logic.runLogicT (evalStateT (unLogicT m) s) next zero
-{-# INLINABLE runLogicT' #-}
+{-# SPECIALIZE unsafeRunLogicT :: LogicST s a -> (a -> ST s r -> ST s r) -> ST s r -> ST s r #-}
 
 observeT :: MonadST m => (forall s . LogicT s m a) -> m a
 observeT m = unsafeObserveT m
@@ -81,7 +79,7 @@ unsafeObserveT :: MonadST m => LogicT s m a -> m a
 unsafeObserveT m = do
   s <- newSwitch
   Logic.observeT (evalStateT (unLogicT m) s)
-{-# INLINABLE unsafeObserveT #-}
+{-# SPECIALIZE unsafeObserveT :: LogicST s a -> ST s a #-}
 
 observeAllT :: MonadST m => (forall s . LogicT s m a) -> m [a]
 observeAllT m = unsafeObserveAllT m
@@ -95,11 +93,10 @@ unsafeObserveAllT :: MonadST m => LogicT s m a -> m [a]
 unsafeObserveAllT m = do
   s <- newSwitch
   Logic.observeAllT (evalStateT (unLogicT m) s)
-{-# INLINABLE unsafeObserveAllT #-}
+{-# SPECIALIZE unsafeObserveAllT :: LogicST s a -> ST s [a] #-}
 
 observeManyT :: MonadST m => Int -> (forall s . LogicT s m a) -> m [a]
 observeManyT n m = unsafeObserveManyT n m
-{-# INLINE observeManyT #-}
 
 observeManyST :: Int -> (forall s . LogicST s a) -> [a]
 observeManyST n m = runST $ unsafeObserveManyT n m
@@ -109,7 +106,7 @@ unsafeObserveManyT :: MonadST m => Int -> LogicT s m a -> m [a]
 unsafeObserveManyT n m = do
   s <- newSwitch
   Logic.observeManyT n (evalStateT (unLogicT m) s)
-{-# INLINABLE unsafeObserveManyT #-}
+{-# SPECIALIZE unsafeObserveManyT :: Int -> LogicST s a -> ST s [a] #-}
 
 instance Functor (LogicT s m) where
   fmap f = LogicT . fmap f . unLogicT
@@ -144,8 +141,9 @@ instance MonadST m => MonadPlus (LogicT s m) where
 logicPlus :: MonadST m => LogicT s m a -> LogicT s m a -> LogicT s m a
 logicPlus m n = do
   s <- newSwitch
-  LogicT $ unLogicT (put s >> m) <|> unLogicT (flipSwitch s >> n)
-{-# INLINABLE logicPlus #-}
+  LogicT $ unLogicT (put s *> m) <|> unLogicT (flipSwitch s *> n)
+{-# SPECIALIZE logicPlus :: LogicST s a -> LogicST s a -> LogicST s a #-}
+{-# SPECIALIZE logicPlus :: LogicIO s a -> LogicIO s a -> LogicIO s a #-}
 
 instance MonadST m => MonadLogic (LogicT s m) where
   msplit = LogicT . fmap (fmap (fmap LogicT)) . msplit . unLogicT
@@ -192,7 +190,8 @@ data Write m a = Write {-# UNPACK #-} !(Switch m) a
 
 newRef :: MonadST m => a -> LogicT s m (Ref s m a)
 newRef a = get >>= liftST . fmap Ref . newSTRef a
-{-# INLINABLE newRef #-}
+{-# SPECIALIZE newRef :: a -> LogicST s (Ref s (ST s) a) #-}
+{-# SPECIALIZE newRef :: a -> LogicIO s (Ref s IO a) #-}
 
 newSTRef :: a -> Switch m -> ST (World m) (ST.STRef (World m) (Value m a))
 newSTRef a = ST.newSTRef .! New . flip Write a
@@ -203,7 +202,8 @@ f .! g = \ a -> a `seq` f (g a)
 
 readRef :: MonadST m => Ref s m a -> LogicT s m a
 readRef (Ref ref) = liftST $ readSTRef ref
-{-# INLINABLE readRef #-}
+{-# SPECIALIZE readRef :: Ref s (ST s) a -> LogicST s a #-}
+{-# SPECIALIZE readRef :: Ref s IO a -> LogicIO s a #-}
 
 readSTRef :: ST.STRef (World m) (Value m a) -> ST (World m) a
 readSTRef ref = ST.readSTRef ref >>= \ value -> case value of
@@ -218,15 +218,18 @@ readSTRef ref = ST.readSTRef ref >>= \ value -> case value of
 
 writeRef :: MonadST m => Ref s m a -> a -> LogicT s m ()
 writeRef ref a = modifyRef'' ref $ \ switch _ -> Write switch a
-{-# INLINABLE writeRef #-}
+{-# SPECIALIZE writeRef :: Ref s (ST s) a -> a -> LogicST s () #-}
+{-# SPECIALIZE writeRef :: Ref s IO a -> a -> LogicIO s () #-}
 
 modifyRef :: MonadST m => Ref s m a -> (a -> a) -> LogicT s m ()
 modifyRef ref f = modifyRef'' ref $ \ switch a -> Write switch $ f a
-{-# INLINABLE modifyRef #-}
+{-# SPECIALIZE modifyRef :: Ref s (ST s) a -> (a -> a) -> LogicST s () #-}
+{-# SPECIALIZE modifyRef :: Ref s IO a -> (a -> a) -> LogicIO s () #-}
 
 modifyRef' :: MonadST m => Ref s m a -> (a -> a) -> LogicT s m ()
 modifyRef' ref f = modifyRef'' ref $ \ switch a -> Write switch $! f a
-{-# INLINABLE modifyRef' #-}
+{-# SPECIALIZE modifyRef' :: Ref s (ST s) a -> (a -> a) -> LogicST s () #-}
+{-# SPECIALIZE modifyRef' :: Ref s IO a -> (a -> a) -> LogicIO s () #-}
 
 modifyRef'' :: MonadST m => Ref s m a -> (Switch m -> a -> Write m a) -> LogicT s m ()
 modifyRef'' (Ref ref) f = get >>= \ r -> liftST $ modifySTRef ref f r

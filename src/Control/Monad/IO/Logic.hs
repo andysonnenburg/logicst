@@ -9,13 +9,6 @@ module Control.Monad.IO.Logic
 
 import Control.Monad.ST.Logic.Internal
 
-type LogicIO s = LogicT s IO
-
-{-# SPECIALIZE logicPlus :: LogicIO s a -> LogicIO s a -> LogicIO s a #-}
-{-# SPECIALIZE unsafeObserveT :: LogicIO s a -> IO a #-}
-{-# SPECIALIZE unsafeObserveManyT :: Int -> LogicIO s a -> IO [a] #-}
-{-# SPECIALIZE unsafeObserveAllT :: LogicIO s a -> IO [a] #-}
-
 runLogicIO :: (forall s . LogicIO s a) -> (a -> IO r -> IO r) -> IO r -> IO r
 runLogicIO = runLogicT
 {-# INLINE runLogicIO #-}

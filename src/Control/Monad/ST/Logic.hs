@@ -7,18 +7,8 @@ module Control.Monad.ST.Logic
        , observeManyST
        ) where
 
-#ifdef MODULE_Control_Monad_ST_Safe
-import Control.Monad.ST.Safe
-#else
-import Control.Monad.ST
-#endif
 import Control.Monad.ST.Logic.Internal (LogicST)
 import qualified Control.Monad.ST.Logic.Internal as Internal
-
-{-# SPECIALIZE Internal.logicPlus :: LogicST s a -> LogicST s a -> LogicST s a #-}
-{-# SPECIALIZE Internal.unsafeObserveT :: LogicST s a -> ST s a #-}
-{-# SPECIALIZE Internal.unsafeObserveManyT :: Int -> LogicST s a -> ST s [a] #-}
-{-# SPECIALIZE Internal.unsafeObserveAllT :: LogicST s a -> ST s [a] #-}
 
 runLogicST :: (forall s . LogicST s a) -> (a -> r -> r) -> r -> r
 runLogicST = Internal.runLogicST
