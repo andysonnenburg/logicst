@@ -8,7 +8,7 @@ module Data.STRef.Logic
        , modifySTRef'
        ) where
 
-#if MIN_VERSION_base(4, 4, 0)
+#ifdef MODULE_Control_Monad_ST_Safe
 import Control.Monad.ST.Safe
 #else
 import Control.Monad.ST
