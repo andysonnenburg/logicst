@@ -13,7 +13,6 @@ import Control.Monad.ST.Safe
 #else
 import Control.Monad.ST
 #endif
-import Control.Monad.ST.Logic
 import Control.Monad.ST.Logic.Internal
 
 type STRef s = Ref s (ST s)

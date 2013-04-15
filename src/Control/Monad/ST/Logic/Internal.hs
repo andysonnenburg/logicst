@@ -5,6 +5,7 @@ module Control.Monad.ST.Logic.Internal
        , observeT
        , observeAllT
        , observeManyT
+       , liftST
        , LogicST
        , LogicIO
        , runLogicST
@@ -270,4 +271,3 @@ modifySTRef ref f = \ r -> ST.readSTRef ref >>= \ value -> backtrack value r
       ST.writeSTRef ref $!
       if switch == r then New (f r a) else f r a :| xs
 {-# INLINE modifySTRef #-}
-

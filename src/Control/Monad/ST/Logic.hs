@@ -5,8 +5,14 @@ module Control.Monad.ST.Logic
        , observeST
        , observeAllST
        , observeManyST
+       , liftST
        ) where
 
+#ifdef MODULE_Control_Monad_ST_Safe
+import Control.Monad.ST.Safe
+#else
+import Control.Monad.ST
+#endif
 import Control.Monad.ST.Logic.Internal (LogicST)
 import qualified Control.Monad.ST.Logic.Internal as Internal
 
@@ -25,3 +31,7 @@ observeAllST = Internal.observeAllST
 observeManyST :: Int -> (forall s . LogicST s a) -> [a]
 observeManyST = Internal.observeManyST
 {-# INLINE observeManyST #-}
+
+liftST :: ST s a -> LogicST s a
+liftST = Internal.liftST
+{-# INLINE liftST #-}
