@@ -124,7 +124,7 @@ instance Applicative (LogicT s m) where
   {-# INLINE pure #-}
   f <*> a = LogicT $ unLogicT f <*> unLogicT a
   {-# INLINE (<*>) #-}
-#if MIN_VERSION_base(4, 2, 0)
+#ifndef CLASS_OldApplicative
   a *> b = LogicT $ unLogicT a *> unLogicT b
   {-# INLINE (*>) #-}
   a <* b = LogicT $ unLogicT a <* unLogicT b
@@ -134,7 +134,7 @@ instance Applicative (LogicT s m) where
 instance MonadST m => Alternative (LogicT s m) where
   empty = LogicT empty
   {-# INLINE empty #-}
-  (<|>) = logicPlus
+  (<|>) = plusLogic
   {-# INLINE (<|>) #-}
 
 instance Monad (LogicT s m) where
@@ -150,31 +150,31 @@ instance Monad (LogicT s m) where
 instance MonadST m => MonadPlus (LogicT s m) where
   mzero = LogicT mzero
   {-# INLINE mzero #-}
-  mplus = logicPlus
+  mplus = plusLogic
   {-# INLINE mplus #-}
 
-logicPlus :: MonadST m => LogicT s m a -> LogicT s m a -> LogicT s m a
-logicPlus m n = do
+plusLogic :: MonadST m => LogicT s m a -> LogicT s m a -> LogicT s m a
+plusLogic m n = do
   s <- newSwitch
   LogicT $ unLogicT (put s *> m) <|> unLogicT (flipSwitch s *> n)
-{-# SPECIALIZE logicPlus :: LogicST s a -> LogicST s a -> LogicST s a #-}
-{-# SPECIALIZE logicPlus :: LogicIO s a -> LogicIO s a -> LogicIO s a #-}
+{-# SPECIALIZE plusLogic :: LogicST s a -> LogicST s a -> LogicST s a #-}
+{-# SPECIALIZE plusLogic :: LogicIO s a -> LogicIO s a -> LogicIO s a #-}
 
 instance MonadST m => MonadLogic (LogicT s m) where
   msplit = LogicT . fmap (fmap (fmap LogicT)) . msplit . unLogicT
   {-# INLINE msplit #-}
 
-lift' :: Monad m => m a -> LogicT s m a
-lift' = LogicT . lift . lift
-{-# SPECIALIZE lift' :: ST s a -> LogicST s a #-}
-{-# SPECIALIZE lift' :: IO a -> LogicIO s a #-}
+liftLogic :: Monad m => m a -> LogicT s m a
+liftLogic = LogicT . lift . lift
+{-# SPECIALIZE liftLogic :: ST s a -> LogicST s a #-}
+{-# SPECIALIZE liftLogic :: IO a -> LogicIO s a #-}
 
 instance MonadIO m => MonadIO (LogicT s m) where
-  liftIO = lift' . liftIO
+  liftIO = liftLogic . liftIO
 
 instance MonadST m => MonadST (LogicT s m) where
   type World (LogicT s m) = World m
-  liftST = lift' . liftST
+  liftST = liftLogic . liftST
   {-# INLINE liftST #-}
 
 get :: Monad m => LogicT s m (Switch m)
