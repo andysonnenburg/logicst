@@ -16,6 +16,8 @@ import Control.Monad.ST
 import Control.Monad.ST.Logic.Internal hiding (liftST)
 import qualified Control.Monad.ST.Logic.Internal as Internal
 
+type LogicIO s = LogicT s IO
+
 runLogicIO :: (forall s . LogicIO s a) -> (a -> IO r -> IO r) -> IO r -> IO r
 runLogicIO = runLogicT
 {-# INLINE runLogicIO #-}

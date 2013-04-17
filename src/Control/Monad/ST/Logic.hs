@@ -13,8 +13,10 @@ import Control.Monad.ST.Safe
 #else
 import Control.Monad.ST
 #endif
-import Control.Monad.ST.Logic.Internal (LogicST)
+import Control.Monad.ST.Logic.Internal (LogicT)
 import qualified Control.Monad.ST.Logic.Internal as Internal
+
+type LogicST s = LogicT s (ST s)
 
 runLogicST :: (forall s . LogicST s a) -> (a -> r -> r) -> r -> r
 runLogicST = Internal.runLogicST

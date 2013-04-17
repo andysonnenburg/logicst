@@ -7,6 +7,7 @@ module Data.IORef.Logic
        , modifyIORef'
        ) where
 
+import Control.Monad.IO.Logic
 import Control.Monad.ST.Logic.Internal
 
 type IORef s = Ref s IO

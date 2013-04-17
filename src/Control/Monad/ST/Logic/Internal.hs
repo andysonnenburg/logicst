@@ -6,8 +6,6 @@ module Control.Monad.ST.Logic.Internal
        , observeAllT
        , observeManyT
        , liftST
-       , LogicST
-       , LogicIO
        , runLogicST
        , observeST
        , observeAllST
@@ -52,14 +50,11 @@ newtype LogicT s m a =
   LogicT { unLogicT :: StateT (Switch m) (Logic.LogicT m) a
          }
 
-type LogicST s = LogicT s (ST s)
-type LogicIO s = LogicT s IO
-
 runLogicT :: MonadST m => (forall s . LogicT s m a) -> (a -> m r -> m r) -> m r -> m r
 runLogicT m = unsafeRunLogicT m
 {-# INLINE runLogicT #-}
 
-runLogicST :: (forall s . LogicST s a) -> (a -> r -> r) -> r -> r
+runLogicST :: (forall s . LogicT s (ST s) a) -> (a -> r -> r) -> r -> r
 runLogicST m next zero = runST $ unsafeRunLogicT m (liftM . next) (return zero)
 {-# INLINE runLogicST #-}
 
@@ -67,14 +62,14 @@ unsafeRunLogicT :: MonadST m => LogicT s m a -> (a -> m r -> m r) -> m r -> m r
 unsafeRunLogicT m next zero = do
   s <- newSwitch
   Logic.runLogicT (evalStateT (unLogicT m) s) next zero
-{-# SPECIALIZE unsafeRunLogicT :: LogicST s a -> (a -> ST s r -> ST s r) -> ST s r -> ST s r #-}
-{-# SPECIALIZE unsafeRunLogicT :: LogicIO s a -> (a -> IO r -> IO r) -> IO r -> IO r #-}
+{-# SPECIALIZE unsafeRunLogicT :: LogicT s (ST s) a -> (a -> ST s r -> ST s r) -> ST s r -> ST s r #-}
+{-# SPECIALIZE unsafeRunLogicT :: LogicT s IO a -> (a -> IO r -> IO r) -> IO r -> IO r #-}
 
 observeT :: MonadST m => (forall s . LogicT s m a) -> m a
 observeT m = unsafeObserveT m
 {-# INLINE observeT #-}
 
-observeST :: (forall s . LogicST s a) -> a
+observeST :: (forall s . LogicT s (ST s) a) -> a
 observeST m = runST $ unsafeObserveT m
 {-# INLINE observeST #-}
 
@@ -82,14 +77,14 @@ unsafeObserveT :: MonadST m => LogicT s m a -> m a
 unsafeObserveT m = do
   s <- newSwitch
   Logic.observeT (evalStateT (unLogicT m) s)
-{-# SPECIALIZE unsafeObserveT :: LogicST s a -> ST s a #-}
-{-# SPECIALIZE unsafeObserveT :: LogicIO s a -> IO a #-}
+{-# SPECIALIZE unsafeObserveT :: LogicT s (ST s) a -> ST s a #-}
+{-# SPECIALIZE unsafeObserveT :: LogicT s IO a -> IO a #-}
 
 observeAllT :: MonadST m => (forall s . LogicT s m a) -> m [a]
 observeAllT m = unsafeObserveAllT m
 {-# INLINE observeAllT #-}
 
-observeAllST :: (forall s . LogicST s a) -> [a]
+observeAllST :: (forall s . LogicT s (ST s) a) -> [a]
 observeAllST m = runST $ unsafeObserveAllT m
 {-# INLINE observeAllST #-}
 
@@ -97,14 +92,14 @@ unsafeObserveAllT :: MonadST m => LogicT s m a -> m [a]
 unsafeObserveAllT m = do
   s <- newSwitch
   Logic.observeAllT (evalStateT (unLogicT m) s)
-{-# SPECIALIZE unsafeObserveAllT :: LogicST s a -> ST s [a] #-}
-{-# SPECIALIZE unsafeObserveAllT :: LogicIO s a -> IO [a] #-}
+{-# SPECIALIZE unsafeObserveAllT :: LogicT s (ST s) a -> ST s [a] #-}
+{-# SPECIALIZE unsafeObserveAllT :: LogicT s IO a -> IO [a] #-}
 
 observeManyT :: MonadST m => Int -> (forall s . LogicT s m a) -> m [a]
 observeManyT n m = unsafeObserveManyT n m
 {-# INLINE observeManyT #-}
 
-observeManyST :: Int -> (forall s . LogicST s a) -> [a]
+observeManyST :: Int -> (forall s . LogicT s (ST s) a) -> [a]
 observeManyST n m = runST $ unsafeObserveManyT n m
 {-# INLINE observeManyST #-}
 
@@ -112,8 +107,8 @@ unsafeObserveManyT :: MonadST m => Int -> LogicT s m a -> m [a]
 unsafeObserveManyT n m = do
   s <- newSwitch
   Logic.observeManyT n (evalStateT (unLogicT m) s)
-{-# SPECIALIZE unsafeObserveManyT :: Int -> LogicST s a -> ST s [a] #-}
-{-# SPECIALIZE unsafeObserveManyT :: Int -> LogicIO s a -> IO [a] #-}
+{-# SPECIALIZE unsafeObserveManyT :: Int -> LogicT s (ST s) a -> ST s [a] #-}
+{-# SPECIALIZE unsafeObserveManyT :: Int -> LogicT s IO a -> IO [a] #-}
 
 instance Functor (LogicT s m) where
   fmap f = LogicT . fmap f . unLogicT
@@ -157,8 +152,8 @@ plusLogic :: MonadST m => LogicT s m a -> LogicT s m a -> LogicT s m a
 plusLogic m n = do
   s <- newSwitch
   LogicT $ unLogicT (put s *> m) <|> unLogicT (flipSwitch s *> n)
-{-# SPECIALIZE plusLogic :: LogicST s a -> LogicST s a -> LogicST s a #-}
-{-# SPECIALIZE plusLogic :: LogicIO s a -> LogicIO s a -> LogicIO s a #-}
+{-# SPECIALIZE plusLogic :: LogicT s (ST s) a -> LogicT s (ST s) a -> LogicT s (ST s) a #-}
+{-# SPECIALIZE plusLogic :: LogicT s IO a -> LogicT s IO a -> LogicT s IO a #-}
 
 instance MonadST m => MonadLogic (LogicT s m) where
   msplit = LogicT . fmap (fmap (fmap LogicT)) . msplit . unLogicT
@@ -166,8 +161,8 @@ instance MonadST m => MonadLogic (LogicT s m) where
 
 liftLogic :: Monad m => m a -> LogicT s m a
 liftLogic = LogicT . lift . lift
-{-# SPECIALIZE liftLogic :: ST s a -> LogicST s a #-}
-{-# SPECIALIZE liftLogic :: IO a -> LogicIO s a #-}
+{-# SPECIALIZE liftLogic :: ST s a -> LogicT s (ST s) a #-}
+{-# SPECIALIZE liftLogic :: IO a -> LogicT s IO a #-}
 
 instance MonadIO m => MonadIO (LogicT s m) where
   liftIO = liftLogic . liftIO
@@ -179,13 +174,13 @@ instance MonadST m => MonadST (LogicT s m) where
 
 get :: Monad m => LogicT s m (Switch m)
 get = LogicT State.get
-{-# SPECIALIZE get :: LogicST s (Switch (ST s)) #-}
-{-# SPECIALIZE get :: LogicIO s (Switch IO) #-}
+{-# SPECIALIZE get :: LogicT s (ST s) (Switch (ST s)) #-}
+{-# SPECIALIZE get :: LogicT s IO (Switch IO) #-}
 
 put :: Monad m => Switch m -> LogicT s m ()
 put s = s `seq` LogicT (State.put s)
-{-# SPECIALIZE put :: Switch (ST s) -> LogicST s () #-}
-{-# SPECIALIZE put :: Switch IO -> LogicIO s () #-}
+{-# SPECIALIZE put :: Switch (ST s) -> LogicT s (ST s) () #-}
+{-# SPECIALIZE put :: Switch IO -> LogicT s IO () #-}
 
 type Switch m = ST.STRef (World m) Bool
 
@@ -212,8 +207,8 @@ data Write m a = Write {-# UNPACK #-} !(Switch m) a
 
 newRef :: MonadST m => a -> LogicT s m (Ref s m a)
 newRef a = get >>= liftST . fmap Ref . newSTRef a
-{-# SPECIALIZE newRef :: a -> LogicST s (Ref s (ST s) a) #-}
-{-# SPECIALIZE newRef :: a -> LogicIO s (Ref s IO a) #-}
+{-# SPECIALIZE newRef :: a -> LogicT s (ST s) (Ref s (ST s) a) #-}
+{-# SPECIALIZE newRef :: a -> LogicT s IO (Ref s IO a) #-}
 
 newSTRef :: a -> Switch m -> ST (World m) (ST.STRef (World m) (Value m a))
 newSTRef a = ST.newSTRef .! New . flip Write a
@@ -224,8 +219,8 @@ f .! g = \ a -> a `seq` f (g a)
 
 readRef :: MonadST m => Ref s m a -> LogicT s m a
 readRef (Ref ref) = liftST $ readSTRef ref
-{-# SPECIALIZE readRef :: Ref s (ST s) a -> LogicST s a #-}
-{-# SPECIALIZE readRef :: Ref s IO a -> LogicIO s a #-}
+{-# SPECIALIZE readRef :: Ref s (ST s) a -> LogicT s (ST s) a #-}
+{-# SPECIALIZE readRef :: Ref s IO a -> LogicT s IO a #-}
 
 readSTRef :: ST.STRef (World m) (Value m a) -> ST (World m) a
 readSTRef ref = ST.readSTRef ref >>= \ value -> case value of
@@ -240,18 +235,18 @@ readSTRef ref = ST.readSTRef ref >>= \ value -> case value of
 
 writeRef :: MonadST m => Ref s m a -> a -> LogicT s m ()
 writeRef ref a = modifyRef'' ref $ \ switch _ -> Write switch a
-{-# SPECIALIZE writeRef :: Ref s (ST s) a -> a -> LogicST s () #-}
-{-# SPECIALIZE writeRef :: Ref s IO a -> a -> LogicIO s () #-}
+{-# SPECIALIZE writeRef :: Ref s (ST s) a -> a -> LogicT s (ST s) () #-}
+{-# SPECIALIZE writeRef :: Ref s IO a -> a -> LogicT s IO () #-}
 
 modifyRef :: MonadST m => Ref s m a -> (a -> a) -> LogicT s m ()
 modifyRef ref f = modifyRef'' ref $ \ switch a -> Write switch $ f a
-{-# SPECIALIZE modifyRef :: Ref s (ST s) a -> (a -> a) -> LogicST s () #-}
-{-# SPECIALIZE modifyRef :: Ref s IO a -> (a -> a) -> LogicIO s () #-}
+{-# SPECIALIZE modifyRef :: Ref s (ST s) a -> (a -> a) -> LogicT s (ST s) () #-}
+{-# SPECIALIZE modifyRef :: Ref s IO a -> (a -> a) -> LogicT s IO () #-}
 
 modifyRef' :: MonadST m => Ref s m a -> (a -> a) -> LogicT s m ()
 modifyRef' ref f = modifyRef'' ref $ \ switch a -> Write switch $! f a
-{-# SPECIALIZE modifyRef' :: Ref s (ST s) a -> (a -> a) -> LogicST s () #-}
-{-# SPECIALIZE modifyRef' :: Ref s IO a -> (a -> a) -> LogicIO s () #-}
+{-# SPECIALIZE modifyRef' :: Ref s (ST s) a -> (a -> a) -> LogicT s (ST s) () #-}
+{-# SPECIALIZE modifyRef' :: Ref s IO a -> (a -> a) -> LogicT s IO () #-}
 
 modifyRef'' :: MonadST m => Ref s m a -> (Switch m -> a -> Write m a) -> LogicT s m ()
 modifyRef'' (Ref ref) f = get >>= \ r -> liftST $ modifySTRef ref f r
