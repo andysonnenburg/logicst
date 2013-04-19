@@ -118,7 +118,7 @@ blue = pure $ embed Blue
 fromList = foldr cons nil
 
 zebraProblem h w z = do
-  join $ (h #=) <$> fromList [house norwegian __ __ __ __, __, house __ __ __ milk __, __, __]
+  (h #=) =<< fromList [house norwegian __ __ __ __, __, house __ __ __ milk __, __, __]
   join $ member <$> house englishman __ __ __ red <*> pure h
   join $ member <$> house spaniard dog __ __ __ <*> pure h
   join $ member <$> house __ __ __ coffee green <*> pure h
@@ -140,17 +140,17 @@ nextto x y list =
   iright y x list
 
 iright left right list =
-  do join $ (list #=) <$> cons (pure left) (cons (pure right) __)
+  do (list #=) =<< cons (pure left) (cons (pure right) __)
   <|>
   do rest <- freshTerm
-     join $ (list #=) <$> cons __ (pure rest)
+     (list #=) =<< cons __ (pure rest)
      iright left right rest
 
 member x list =
   do join $ (list #=) <$> cons (pure x) __
   <|>
   do tail <- freshTerm
-     join $ (list #=) <$> cons __ (pure tail)
+     (list #=) =<< cons __ (pure tail)
      member x tail
 
 __ :: MonadVar m => m (Term m f)
@@ -234,38 +234,38 @@ unify f = \ t1 t2 -> do
       x1 <- semiprune t1
       x2 <- semiprune t2
       case (x1, x2) of
-        (_ :*! UnboundVar v1, t2' :*! UnboundVar v2)
+        (_ :*! UnwrittenVar v1, t2' :*! UnwrittenVar v2)
           | sameVar v1 v2 ->
             return t2'
           | otherwise -> do
             writeVar v1 t2'
             return t2'
-        (_ :*! UnboundVar v1, t2' :*! BoundVar _ _) -> do
+        (_ :*! UnwrittenVar v1, t2' :*! WrittenVar _ _) -> do
           writeVar v1 t2'
           return t2'
-        (t1' :*! BoundVar _ _, _ :*! UnboundVar v2) -> do
+        (t1' :*! WrittenVar _ _, _ :*! UnwrittenVar v2) -> do
           writeVar v2 t1'
           return t1'
-        (_ :*! BoundVar v1 f1, t2' :*! BoundVar v2 f2)
+        (_ :*! WrittenVar v1 f1, t2' :*! WrittenVar v2 f2)
           | sameVar v1 v2 ->
             return t2'
           | otherwise -> do
             writeVar v2 =<< match f1 f2
             writeVar v1 t2'
             return t2'
-        (t1' :*! UnboundVar v1, t2' :*! Term _) -> do
+        (t1' :*! UnwrittenVar v1, t2' :*! Base _) -> do
           writeVar v1 t2'
           return t1'
-        (t1' :*! BoundVar v1 f1, _ :*! Term f2) -> do
+        (t1' :*! WrittenVar v1 f1, _ :*! Base f2) -> do
           writeVar v1 =<< match f1 f2
           return t1'
-        (_ :*! Term f1, t2' :*! BoundVar v2 f2) -> do
+        (_ :*! Base f1, t2' :*! WrittenVar v2 f2) -> do
           writeVar v2 =<< match f1 f2
           return t2'
-        (t1' :*! Term _, t2' :*! UnboundVar v2) -> do
+        (t1' :*! Base _, t2' :*! UnwrittenVar v2) -> do
           writeVar v2 t1'
           return t2'
-        (_ :*! Term f1, _ :*! Term f2) ->
+        (_ :*! Base f1, _ :*! Base f2) ->
           match f1 f2
     match f1 f2 =
       maybe (f f1 f2) (liftM embed . mapM (uncurry loop)) $ zipMatch f1 f2
@@ -274,33 +274,33 @@ freeze :: (Traversable f, MonadVar m) => Term m f -> m (Fix f)
 freeze = loop
   where
     loop = semiprune >=> \ x -> case x of
-      _ :*! UnboundVar _ -> error "freeze: unwritten var"
-      _ :*! BoundVar _ f -> liftM Fix $ mapM loop f
-      _ :*! Term f -> liftM Fix $ mapM loop f
+      _ :*! UnwrittenVar _ -> error "freeze: unwritten var"
+      _ :*! WrittenVar _ f -> liftM Fix $ mapM loop f
+      _ :*! Base f -> liftM Fix $ mapM loop f
 
 unfreeze :: Functor f => Fix f -> Term m f
 unfreeze = refix
 
 semiprune :: MonadVar m => Term m f -> m (Pair (Term m f) (Semipruned m (Term m f)))
 semiprune t0 = case t0 of
-  Embed f -> return $ t0 :*! Term f
+  Embed f -> return $ t0 :*! Base f
   Var v -> loop t0 v
   where
     loop t v = do
       a <- readVar v
       case a of
         Nothing ->
-          return $! t :*! UnboundVar v
+          return $! t :*! UnwrittenVar v
         Just t'@(Var v') -> do
           x@(t'' :*! _) <- loop t' v'
           writeVar v t''
           return x
         Just (Embed f) ->
-          return $! t :*! (BoundVar v f)
+          return $! t :*! (WrittenVar v f)
 
 data Pair a b = !a :*! !b
 
 data Semipruned m t
-  = UnboundVar !(Var m t)
-  | BoundVar !(Var m t) (Base t t)
-  | Term !(Base t t)
+  = UnwrittenVar !(Var m t)
+  | WrittenVar !(Var m t) (Base t t)
+  | Base !(Base t t)

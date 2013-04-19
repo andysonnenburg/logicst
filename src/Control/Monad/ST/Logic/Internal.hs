@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, Rank2Types, TypeFamilies #-}
+{-# LANGUAGE CPP, ExistentialQuantification, Rank2Types, TypeFamilies #-}
 module Control.Monad.ST.Logic.Internal
        ( LogicT
        , runLogicT
@@ -29,8 +29,8 @@ import Control.Monad.ST.Safe
 import Control.Monad.ST
 #endif
 import Control.Monad.Trans.Class
-import Control.Monad.Trans.State.Strict (StateT, evalStateT)
-import qualified Control.Monad.Trans.State.Strict as State
+import Control.Monad.Trans.Reader (ReaderT, runReaderT)
+import qualified Control.Monad.Trans.Reader as Reader
 
 import qualified Data.STRef as ST
 
@@ -47,7 +47,7 @@ instance MonadST IO where
   liftST = stToIO
 
 newtype LogicT s m a =
-  LogicT { unLogicT :: StateT (Switch m) (Logic.LogicT m) a
+  LogicT { unLogicT :: ReaderT (Env m) (Logic.LogicT m) a
          }
 
 runLogicT :: MonadST m => (forall s . LogicT s m a) -> (a -> m r -> m r) -> m r -> m r
@@ -60,8 +60,8 @@ runLogicST m next zero = runST $ unsafeRunLogicT m (liftM . next) (return zero)
 
 unsafeRunLogicT :: MonadST m => LogicT s m a -> (a -> m r -> m r) -> m r -> m r
 unsafeRunLogicT m next zero = do
-  s <- newSwitch
-  Logic.runLogicT (evalStateT (unLogicT m) s) next zero
+  r <- liftST newEnv
+  Logic.runLogicT (runReaderT (unLogicT m) r) next zero
 {-# SPECIALIZE unsafeRunLogicT :: LogicT s (ST s) a -> (a -> ST s r -> ST s r) -> ST s r -> ST s r #-}
 {-# SPECIALIZE unsafeRunLogicT :: LogicT s IO a -> (a -> IO r -> IO r) -> IO r -> IO r #-}
 
@@ -75,8 +75,8 @@ observeST m = runST $ unsafeObserveT m
 
 unsafeObserveT :: MonadST m => LogicT s m a -> m a
 unsafeObserveT m = do
-  s <- newSwitch
-  Logic.observeT (evalStateT (unLogicT m) s)
+  r <- liftST newEnv
+  Logic.observeT (runReaderT (unLogicT m) r)
 {-# SPECIALIZE unsafeObserveT :: LogicT s (ST s) a -> ST s a #-}
 {-# SPECIALIZE unsafeObserveT :: LogicT s IO a -> IO a #-}
 
@@ -90,8 +90,8 @@ observeAllST m = runST $ unsafeObserveAllT m
 
 unsafeObserveAllT :: MonadST m => LogicT s m a -> m [a]
 unsafeObserveAllT m = do
-  s <- newSwitch
-  Logic.observeAllT (evalStateT (unLogicT m) s)
+  r <- liftST newEnv
+  Logic.observeAllT (runReaderT (unLogicT m) r)
 {-# SPECIALIZE unsafeObserveAllT :: LogicT s (ST s) a -> ST s [a] #-}
 {-# SPECIALIZE unsafeObserveAllT :: LogicT s IO a -> IO [a] #-}
 
@@ -105,8 +105,8 @@ observeManyST n m = runST $ unsafeObserveManyT n m
 
 unsafeObserveManyT :: MonadST m => Int -> LogicT s m a -> m [a]
 unsafeObserveManyT n m = do
-  s <- newSwitch
-  Logic.observeManyT n (evalStateT (unLogicT m) s)
+  r <- liftST newEnv
+  Logic.observeManyT n (runReaderT (unLogicT m) r)
 {-# SPECIALIZE unsafeObserveManyT :: Int -> LogicT s (ST s) a -> ST s [a] #-}
 {-# SPECIALIZE unsafeObserveManyT :: Int -> LogicT s IO a -> IO [a] #-}
 
@@ -149,9 +149,7 @@ instance MonadST m => MonadPlus (LogicT s m) where
   {-# INLINE mplus #-}
 
 plusLogic :: MonadST m => LogicT s m a -> LogicT s m a -> LogicT s m a
-plusLogic m n = do
-  s <- newSwitch
-  LogicT $ unLogicT (put s *> m) <|> unLogicT (flipSwitch s *> n)
+plusLogic m n = LogicT $ unLogicT (mark *> m) <|> unLogicT (backtrack *> n)
 {-# SPECIALIZE plusLogic :: LogicT s (ST s) a -> LogicT s (ST s) a -> LogicT s (ST s) a #-}
 {-# SPECIALIZE plusLogic :: LogicT s IO a -> LogicT s IO a -> LogicT s IO a #-}
 
@@ -172,97 +170,99 @@ instance MonadST m => MonadST (LogicT s m) where
   liftST = liftLogic . liftST
   {-# INLINE liftST #-}
 
-get :: Monad m => LogicT s m (Switch m)
-get = LogicT State.get
-{-# SPECIALIZE get :: LogicT s (ST s) (Switch (ST s)) #-}
-{-# SPECIALIZE get :: LogicT s IO (Switch IO) #-}
+data Env m =
+  Env
+  {-# UNPACK #-} !(ST.STRef (World m) Mark)
+  {-# UNPACK #-} !(ST.STRef (World m) (Trail m))
 
-put :: Monad m => Switch m -> LogicT s m ()
-put s = s `seq` LogicT (State.put s)
-{-# SPECIALIZE put :: Switch (ST s) -> LogicT s (ST s) () #-}
-{-# SPECIALIZE put :: Switch IO -> LogicT s IO () #-}
+newEnv :: ST (World m) (Env m)
+newEnv = Env <$> ST.newSTRef minBound <*> ST.newSTRef Nil
 
-type Switch m = ST.STRef (World m) Bool
+mark :: MonadST m => LogicT s m ()
+mark = do
+  Env m trail <- LogicT Reader.ask
+  liftST $ do
+    ST.modifySTRef' m (+ 1)
+    ST.modifySTRef' trail Mark
 
-newSwitch :: MonadST m => m (Switch m)
-newSwitch = liftST $ ST.newSTRef False
-{-# INLINE newSwitch #-}
+backtrack :: MonadST m => LogicT s m ()
+backtrack = do
+  Env ref trail <- LogicT Reader.ask
+  liftST $ do
+    m <- ST.readSTRef ref
+    ST.writeSTRef ref $! m - 1
+    ST.writeSTRef trail =<< backtrackST =<< ST.readSTRef trail
 
-flipSwitch :: MonadST m => Switch m -> m ()
-flipSwitch = liftST . flip ST.writeSTRef True
-{-# INLINE flipSwitch #-}
+backtrackST :: Trail m -> ST (World m) (Trail m)
+backtrackST (Write ref m a xs) = do
+  ST.writeSTRef ref $! Value m a
+  backtrackST xs
+backtrackST (Mark xs) =
+  return xs
+backtrackST Nil =
+  return Nil
 
-ifFlipped :: Switch (ST s) -> ST s a -> ST s a -> ST s a
-ifFlipped switch t f = do
-  p <- ST.readSTRef switch
-  if p then t else f
+data Trail m
+  = forall a . Write
+    {-# UNPACK #-} !(ST.STRef (World m) (Value a))
+    {-# UNPACK #-} !Mark
+    a
+    !(Trail m)
+  | Mark !(Trail m)
+  | Nil
 
-newtype Ref s m a = Ref (ST.STRef (World m) (Value m a)) deriving Eq
+addWrite :: MonadST m => ST.STRef (World m) (Value a) -> Mark -> a -> LogicT s m ()
+addWrite ref m a = do
+  Env _ trail <- LogicT Reader.ask
+  liftST $ ST.modifySTRef' trail (Write ref m a)
 
-data Value m a
-  = New {-# UNPACK #-} !(Write m a)
-  | {-# UNPACK #-} !(Write m a) :| !(Value m a)
+newtype Ref s m a = Ref (ST.STRef (World m) (Value a)) deriving Eq
 
-data Write m a = Write {-# UNPACK #-} !(Switch m) a
+data Value a = Value {-# UNPACK #-} !Mark a
 
-newRef :: MonadST m => a -> LogicT s m (Ref s m a)
-newRef a = get >>= liftST . fmap Ref . newSTRef a
-{-# SPECIALIZE newRef :: a -> LogicT s (ST s) (Ref s (ST s) a) #-}
-{-# SPECIALIZE newRef :: a -> LogicT s IO (Ref s IO a) #-}
+type Mark = Int
 
-newSTRef :: a -> Switch m -> ST (World m) (ST.STRef (World m) (Value m a))
-newSTRef a = ST.newSTRef .! New . flip Write a
+getMark :: MonadST m => LogicT s m Mark
+getMark = do
+  Env ref _ <- LogicT Reader.ask
+  liftST $ ST.readSTRef ref
 
 infixr 9 .!
 (.!) :: (b -> c) -> (a -> b) -> a -> c
 f .! g = \ a -> a `seq` f (g a)
 
+newRef :: MonadST m => a -> LogicT s m (Ref s m a)
+newRef a = getMark >>= liftST . fmap Ref . ST.newSTRef .! flip Value a
+{-# SPECIALIZE newRef :: a -> LogicT s (ST s) (Ref s (ST s) a) #-}
+{-# SPECIALIZE newRef :: a -> LogicT s IO (Ref s IO a) #-}
+
 readRef :: MonadST m => Ref s m a -> LogicT s m a
-readRef (Ref ref) = liftST $ readSTRef ref
+readRef (Ref ref) = liftST $ do
+  Value _ a <- ST.readSTRef ref
+  return a
 {-# SPECIALIZE readRef :: Ref s (ST s) a -> LogicT s (ST s) a #-}
 {-# SPECIALIZE readRef :: Ref s IO a -> LogicT s IO a #-}
 
-readSTRef :: ST.STRef (World m) (Value m a) -> ST (World m) a
-readSTRef ref = ST.readSTRef ref >>= \ value -> case value of
-  Write switch a :| xs -> ifFlipped switch (backtrack xs) $ return a
-  New (Write _ a) -> return a
-  where
-    backtrack xs@(Write switch a :| ys) =
-      ifFlipped switch (backtrack ys) $
-      ST.writeSTRef ref xs >> return a
-    backtrack xs@(New (Write _ a)) =
-      ST.writeSTRef ref xs >> return a
-
 writeRef :: MonadST m => Ref s m a -> a -> LogicT s m ()
-writeRef ref a = modifyRef'' ref $ \ switch _ -> Write switch a
+writeRef ref a = modifyRef'' ref $ \ m _ -> Value m a
 {-# SPECIALIZE writeRef :: Ref s (ST s) a -> a -> LogicT s (ST s) () #-}
 {-# SPECIALIZE writeRef :: Ref s IO a -> a -> LogicT s IO () #-}
 
 modifyRef :: MonadST m => Ref s m a -> (a -> a) -> LogicT s m ()
-modifyRef ref f = modifyRef'' ref $ \ switch a -> Write switch $ f a
+modifyRef ref f = modifyRef'' ref $ \ m a -> Value m $ f a
 {-# SPECIALIZE modifyRef :: Ref s (ST s) a -> (a -> a) -> LogicT s (ST s) () #-}
 {-# SPECIALIZE modifyRef :: Ref s IO a -> (a -> a) -> LogicT s IO () #-}
 
 modifyRef' :: MonadST m => Ref s m a -> (a -> a) -> LogicT s m ()
-modifyRef' ref f = modifyRef'' ref $ \ switch a -> Write switch $! f a
+modifyRef' ref f = modifyRef'' ref $ \ m a -> Value m $! f a
 {-# SPECIALIZE modifyRef' :: Ref s (ST s) a -> (a -> a) -> LogicT s (ST s) () #-}
 {-# SPECIALIZE modifyRef' :: Ref s IO a -> (a -> a) -> LogicT s IO () #-}
 
-modifyRef'' :: MonadST m => Ref s m a -> (Switch m -> a -> Write m a) -> LogicT s m ()
-modifyRef'' (Ref ref) f = get >>= \ r -> liftST $ modifySTRef ref f r
-{-# INLINE modifyRef'' #-}
-
-modifySTRef :: ST.STRef (World m) (Value m a) ->
-               (Switch m -> a -> Write m a) ->
-               Switch m ->
-               ST (World m) ()
-modifySTRef ref f = \ r -> ST.readSTRef ref >>= \ value -> backtrack value r
-  where
-    backtrack xs@(Write switch a :| ys) r =
-      ifFlipped switch
-      (backtrack ys r)
-      (ST.writeSTRef ref $! f r a :| if switch == r then ys else xs)
-    backtrack xs@(New (Write switch a)) r =
-      ST.writeSTRef ref $!
-      if switch == r then New (f r a) else f r a :| xs
-{-# INLINE modifySTRef #-}
+modifyRef'' :: MonadST m => Ref s m a -> (Mark -> a -> Value a) -> LogicT s m ()
+modifyRef'' (Ref ref) f = do
+  m <- getMark
+  Value m' a <- liftST $ ST.readSTRef ref
+  when (m' < m) $ addWrite ref m' a
+  liftST $ ST.writeSTRef ref $! f m a
+{-# SPECIALIZE modifyRef'' :: Ref s (ST s) a -> (Mark -> a -> Value a) -> LogicT s (ST s) () #-}
+{-# SPECIALIZE modifyRef'' :: Ref s IO a -> (Mark -> a -> Value a) -> LogicT s IO () #-}
