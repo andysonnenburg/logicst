@@ -11,7 +11,7 @@ bug-reports:         http://github.com/sonyandy/logicst/issues
 copyright:           Copyright (C) 2013 Andy Sonnenburg
 category:            Control
 build-type:          Simple
-cabal-version:       >= 1.6
+cabal-version:       >= 1.8
 
 source-repository head
   type: git
@@ -37,3 +37,10 @@ library
   build-depends: base >= 4 && < 5, transformers, logict
   other-extensions: CPP, Rank2Types, TypeFamilies
   ghc-options: -Wall -fwarn-tabs -O2
+
+benchmark unify
+  type: exitcode-stdio-1.0
+  hs-source-dirs: benchmarks
+  main-is: unify.hs
+  build-depends: base, recursion-schemes, criterion, logicst
+  ghc-options: -Wall -O2

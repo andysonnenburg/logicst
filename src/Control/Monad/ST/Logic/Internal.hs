@@ -197,7 +197,7 @@ ifFlipped switch t f = do
   p <- ST.readSTRef switch
   if p then t else f
 
-newtype Ref s m a = Ref (ST.STRef (World m) (Value m a))
+newtype Ref s m a = Ref (ST.STRef (World m) (Value m a)) deriving Eq
 
 data Value m a
   = New {-# UNPACK #-} !(Write m a)
