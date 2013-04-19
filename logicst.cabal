@@ -43,4 +43,4 @@ benchmark unify
   hs-source-dirs: benchmarks
   main-is: unify.hs
   build-depends: base, recursion-schemes, criterion, logicst
-  ghc-options: -Wall -O2
+  ghc-options: -Wall -fwarn-tabs -O2

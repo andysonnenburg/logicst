@@ -7,25 +7,20 @@
   , FlexibleContexts
   , FlexibleInstances
   , NoMonomorphismRestriction
-  , PostfixOperators
-  , StandaloneDeriving
-  , TemplateHaskell
   , TypeFamilies
   , TypeOperators
-  , TypeSynonymInstances
-  , UndecidableInstances #-}
+  , TypeSynonymInstances #-}
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 module Main (main) where
 
 import Control.Applicative
-import Control.Monad (MonadPlus, join, liftM, mzero)
+import Control.Monad (MonadPlus, (>=>), join, liftM, mzero)
 import Control.Monad.IO.Logic
 import Criterion
 import Criterion.Main
 
 import Data.Foldable
-import Data.Functor.Foldable (Base, embed)
-import qualified Data.Functor.Foldable as Functor
+import Data.Functor.Foldable (Base, Fix (Fix), Unfoldable (embed), refix)
 import Data.IORef.Logic
 import Data.Traversable
 
@@ -35,11 +30,12 @@ import Prelude hiding (foldr, mapM, tail)
 
 main :: IO ()
 main = defaultMain
-       [ bench "zebra" $ nfIO $ observeAllIO $ do
+       [ bench "zebra" $ whnfIO $ observeAllIO $ do
             houses <- freshTerm
             waterDrinker <- freshTerm
             zebraOwner <- freshTerm
             zebraProblem houses waterDrinker zebraOwner
+            freeze houses
        ]
 
 newtype IOVar s a = IOVar { unIOVar :: IORef s (Maybe a) } deriving Eq
@@ -86,7 +82,7 @@ data Value a
   | Green
   | Ivory
   | Yellow
-  | Blue deriving (Eq, Functor, Foldable, Traversable, Generic1)
+  | Blue deriving (Show, Eq, Functor, Foldable, Traversable, Generic1)
 
 instance Unifiable Value
 
@@ -122,7 +118,7 @@ blue = pure $ embed Blue
 fromList = foldr cons nil
 
 zebraProblem h w z = do
-  join $ (h #=) <$> fromList [house norwegian __ __ __ __, __, house __ __ __ milk __, __]
+  join $ (h #=) <$> fromList [house norwegian __ __ __ __, __, house __ __ __ milk __, __, __]
   join $ member <$> house englishman __ __ __ red <*> pure h
   join $ member <$> house spaniard dog __ __ __ <*> pure h
   join $ member <$> house __ __ __ coffee green <*> pure h
@@ -170,33 +166,33 @@ class GUnifiable f where
 
 instance GUnifiable V1 where
   gzipMatch _ _ = Nothing
- 
+
 instance GUnifiable U1 where
   gzipMatch U1 U1 = Just U1
- 
+
 instance GUnifiable Par1 where
   gzipMatch (Par1 a) (Par1 b) = Just $ Par1 (a, b)
- 
+
 instance Unifiable f => GUnifiable (Rec1 f) where
   gzipMatch (Rec1 a) (Rec1 b) = Rec1 <$> zipMatch a b
- 
+
 instance Eq c => GUnifiable (K1 i c) where
   gzipMatch (K1 a) (K1 b)
     | a == b = Just $ K1 a
     | otherwise = Nothing
- 
+
 instance GUnifiable a => GUnifiable (M1 i c a) where
   gzipMatch (M1 a) (M1 b) = M1 <$> gzipMatch a b
- 
+
 instance (GUnifiable a, GUnifiable b) => GUnifiable (a :+: b) where
   gzipMatch (L1 a) (L1 b) = L1 <$> gzipMatch a b
   gzipMatch (R1 a) (R1 b) = R1 <$> gzipMatch a b
   gzipMatch _ _ = Nothing
- 
+
 instance (GUnifiable a, GUnifiable b) => GUnifiable (a :*: b) where
   gzipMatch (a1 :*: a2) (b1 :*: b2) =
     (:*:) <$> gzipMatch a1 b1 <*> gzipMatch a2 b2
- 
+
 instance (Unifiable f, GUnifiable g) => GUnifiable (f :.: g) where
   gzipMatch (Comp1 a) (Comp1 b) =
     fmap Comp1 . traverse (uncurry gzipMatch) =<< zipMatch a b
@@ -216,11 +212,9 @@ data Term m f
   = Var !(Var m (Term m f))
   | Embed (f (Term m f))
 
-deriving instance (Eq (Var m (Term m f)), Eq (f (Term m f))) => Eq (Term m f)
-
 type instance Base (Term m f) = f
 
-instance Functor f => Functor.Unfoldable (Term m f) where
+instance Functor f => Unfoldable (Term m f) where
   embed = Embed
 
 freshTerm :: MonadVar m => m (Term m f)
@@ -275,6 +269,17 @@ unify f = \ t1 t2 -> do
           match f1 f2
     match f1 f2 =
       maybe (f f1 f2) (liftM embed . mapM (uncurry loop)) $ zipMatch f1 f2
+
+freeze :: (Traversable f, MonadVar m) => Term m f -> m (Fix f)
+freeze = loop
+  where
+    loop = semiprune >=> \ x -> case x of
+      _ :*! UnboundVar _ -> error "freeze: unwritten var"
+      _ :*! BoundVar _ f -> liftM Fix $ mapM loop f
+      _ :*! Term f -> liftM Fix $ mapM loop f
+
+unfreeze :: Functor f => Fix f -> Term m f
+unfreeze = refix
 
 semiprune :: MonadVar m => Term m f -> m (Pair (Term m f) (Semipruned m (Term m f)))
 semiprune t0 = case t0 of
