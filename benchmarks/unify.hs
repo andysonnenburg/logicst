@@ -35,7 +35,7 @@ main = defaultMain
             waterDrinker <- freshTerm
             zebraOwner <- freshTerm
             zebraProblem houses waterDrinker zebraOwner
-            freeze houses
+            (,,) <$> freeze houses <*> freeze waterDrinker <*> freeze zebraOwner
        ]
 
 newtype IOVar s a = IOVar { unIOVar :: IORef s (Maybe a) } deriving Eq

@@ -32,7 +32,7 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import qualified Control.Monad.Trans.Reader as Reader
 
-import qualified Data.STRef as ST
+import Data.STRef
 
 class Monad m => MonadST m where
   type World m
@@ -172,30 +172,30 @@ instance MonadST m => MonadST (LogicT s m) where
 
 data Env m =
   Env
-  {-# UNPACK #-} !(ST.STRef (World m) Mark)
-  {-# UNPACK #-} !(ST.STRef (World m) (Trail m))
+  {-# UNPACK #-} !(STRef (World m) Mark)
+  {-# UNPACK #-} !(STRef (World m) (Trail m))
 
 newEnv :: ST (World m) (Env m)
-newEnv = Env <$> ST.newSTRef minBound <*> ST.newSTRef Nil
+newEnv = Env <$> newSTRef minBound <*> newSTRef Nil
 
 mark :: MonadST m => LogicT s m ()
 mark = do
   Env m trail <- LogicT Reader.ask
   liftST $ do
-    ST.modifySTRef' m (+ 1)
-    ST.modifySTRef' trail Mark
+    modifySTRef' m (+ 1)
+    modifySTRef' trail Mark
 
 backtrack :: MonadST m => LogicT s m ()
 backtrack = do
   Env ref trail <- LogicT Reader.ask
   liftST $ do
-    m <- ST.readSTRef ref
-    ST.writeSTRef ref $! m - 1
-    ST.writeSTRef trail =<< backtrackST =<< ST.readSTRef trail
+    m <- readSTRef ref
+    writeSTRef ref $! m - 1
+    writeSTRef trail =<< backtrackST =<< readSTRef trail
 
 backtrackST :: Trail m -> ST (World m) (Trail m)
 backtrackST (Write ref m a xs) = do
-  ST.writeSTRef ref $! Value m a
+  writeSTRef ref $! Value m a
   backtrackST xs
 backtrackST (Mark xs) =
   return xs
@@ -204,19 +204,19 @@ backtrackST Nil =
 
 data Trail m
   = forall a . Write
-    {-# UNPACK #-} !(ST.STRef (World m) (Value a))
+    {-# UNPACK #-} !(STRef (World m) (Value a))
     {-# UNPACK #-} !Mark
     a
     !(Trail m)
   | Mark !(Trail m)
   | Nil
 
-addWrite :: MonadST m => ST.STRef (World m) (Value a) -> Mark -> a -> LogicT s m ()
+addWrite :: MonadST m => STRef (World m) (Value a) -> Mark -> a -> LogicT s m ()
 addWrite ref m a = do
   Env _ trail <- LogicT Reader.ask
-  liftST $ ST.modifySTRef' trail (Write ref m a)
+  liftST $ modifySTRef' trail (Write ref m a)
 
-newtype Ref s m a = Ref (ST.STRef (World m) (Value a)) deriving Eq
+newtype Ref s m a = Ref (STRef (World m) (Value a)) deriving Eq
 
 data Value a = Value {-# UNPACK #-} !Mark a
 
@@ -225,20 +225,20 @@ type Mark = Int
 getMark :: MonadST m => LogicT s m Mark
 getMark = do
   Env ref _ <- LogicT Reader.ask
-  liftST $ ST.readSTRef ref
+  liftST $ readSTRef ref
 
 infixr 9 .!
 (.!) :: (b -> c) -> (a -> b) -> a -> c
 f .! g = \ a -> a `seq` f (g a)
 
 newRef :: MonadST m => a -> LogicT s m (Ref s m a)
-newRef a = getMark >>= liftST . fmap Ref . ST.newSTRef .! flip Value a
+newRef a = getMark >>= liftST . fmap Ref . newSTRef .! flip Value a
 {-# SPECIALIZE newRef :: a -> LogicT s (ST s) (Ref s (ST s) a) #-}
 {-# SPECIALIZE newRef :: a -> LogicT s IO (Ref s IO a) #-}
 
 readRef :: MonadST m => Ref s m a -> LogicT s m a
 readRef (Ref ref) = liftST $ do
-  Value _ a <- ST.readSTRef ref
+  Value _ a <- readSTRef ref
   return a
 {-# SPECIALIZE readRef :: Ref s (ST s) a -> LogicT s (ST s) a #-}
 {-# SPECIALIZE readRef :: Ref s IO a -> LogicT s IO a #-}
@@ -261,8 +261,15 @@ modifyRef' ref f = modifyRef'' ref $ \ m a -> Value m $! f a
 modifyRef'' :: MonadST m => Ref s m a -> (Mark -> a -> Value a) -> LogicT s m ()
 modifyRef'' (Ref ref) f = do
   m <- getMark
-  Value m' a <- liftST $ ST.readSTRef ref
+  Value m' a <- liftST $ readSTRef ref
   when (m' < m) $ addWrite ref m' a
-  liftST $ ST.writeSTRef ref $! f m a
-{-# SPECIALIZE modifyRef'' :: Ref s (ST s) a -> (Mark -> a -> Value a) -> LogicT s (ST s) () #-}
-{-# SPECIALIZE modifyRef'' :: Ref s IO a -> (Mark -> a -> Value a) -> LogicT s IO () #-}
+  liftST $ writeSTRef ref $! f m a
+{-# INLINE modifyRef'' #-}
+
+#ifndef FUNCTION_modifySTRef
+modifySTRef' :: STRef s a -> (a -> a) -> ST s ()
+modifySTRef' ref f = do
+  x <- readSTRef ref
+  let x' = f x
+  x' `seq` writeSTRef ref x'
+#endif
